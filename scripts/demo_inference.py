@@ -10,6 +10,14 @@ import torch
 from tqdm import tqdm
 import natsort
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Get the parent directory (which should contain both the script and the detector module)
+parent_dir = os.path.dirname(script_dir)
+
+# Add the parent directory to sys.path
+sys.path.insert(0, parent_dir)
+
 from detector.apis import get_detector
 from trackers.tracker_api import Tracker
 from trackers.tracker_cfg import cfg as tcfg

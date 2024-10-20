@@ -728,6 +728,8 @@ def write_json(all_results, outputpath, form=None, for_eval=False, outputfile='a
             else:
                 json_results.append(result)
 
+    print(result)
+
     if form == 'cmu': # the form of CMU-Pose
         with open(os.path.join(outputpath, outputfile), 'w') as json_file:
             json_file.write(json.dumps(json_results_cmu))
@@ -744,9 +746,11 @@ def write_json(all_results, outputpath, form=None, for_eval=False, outputfile='a
             for name in json_results_cmu.keys():
                 with open(os.path.join(outputpath,'sep-json',name.split('.')[0]+'.json'),'w') as json_file:
                     json_file.write(json.dumps(json_results_cmu[name]))
-    else:
+    else: 
         with open(os.path.join(outputpath, outputfile), 'w') as json_file:
             json_file.write(json.dumps(json_results))
+    
+    return json_results
 
 
 def ppose_nms_validate_preprocess(_res):

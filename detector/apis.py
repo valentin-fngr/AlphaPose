@@ -15,8 +15,12 @@ def get_detector(opt=None):
     elif 'yolox' in opt.detector:
         from detector.yolox_api import YOLOXDetector
         from detector.yolox_cfg import cfg
-        if opt.detector.lower() == 'yolox':
-            opt.detector = 'yolox-x'
+        # TODO : implement multiple yolo version later. 
+        # not important for now 
+        if opt.detector.lower() == 'yolox-l':
+            opt.detector = 'yolox-l'
+        else: 
+            raise NotImplemented("Only Yolox-l for now !")
         cfg.MODEL_NAME = opt.detector.lower()
         cfg.MODEL_WEIGHTS = f'detector/yolox/data/{opt.detector.lower().replace("-", "_")}.pth'
         return YOLOXDetector(cfg, opt)

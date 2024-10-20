@@ -12,7 +12,7 @@ from alphapose.utils.transforms import get_func_heatmap_to_coord
 from alphapose.utils.pPose_nms import pose_nms, write_json
 
 DEFAULT_VIDEO_SAVE_OPT = {
-    'savepath': 'examples/res/1.mp4',
+    'savepath': 'debug.mp4',
     'fourcc': cv2.VideoWriter_fourcc(*'mp4v'),
     'fps': 25,
     'frameSize': (640, 480)
@@ -35,9 +35,15 @@ class DataWriter():
         # initialize the queue used to store frames read from
         # the video file
         if opt.sp:
+            self._stopped = False
             self.result_queue = Queue(maxsize=queueSize)
         else:
+            self._stopped = mp.Value('b', False)
             self.result_queue = mp.Queue(maxsize=queueSize)
+        # else:
+
+        if not os.path.exists(opt.outputpath): 
+            os.mkdir(opt.outputpath)
 
         if opt.save_img:
             if not os.path.exists(opt.outputpath + '/vis'):
@@ -63,6 +69,8 @@ class DataWriter():
 
         self.use_heatmap_loss = (self.cfg.DATA_PRESET.get('LOSS_TYPE', 'MSELoss') == 'MSELoss')
 
+        self.final_results = []
+
     def start_worker(self, target):
         if self.opt.sp:
             p = Thread(target=target, args=())
@@ -81,6 +89,7 @@ class DataWriter():
         final_result = []
         norm_type = self.cfg.LOSS.get('NORM_TYPE', None)
         hm_size = self.cfg.DATA_PRESET.HEATMAP_SIZE
+        outputfile = self.video_save_opt['savepath'].split("/")[-1][:-4]
         if self.save_video:
             # initialize the file video stream, adapt ouput video resolution to original video
             stream = cv2.VideoWriter(*[self.video_save_opt[k] for k in ['savepath', 'fourcc', 'fps', 'frameSize']])
@@ -100,9 +109,8 @@ class DataWriter():
                 # if the thread indicator variable is set (img is None), stop the thread
                 if self.save_video:
                     stream.release()
-                write_json(final_result, self.opt.outputpath, form=self.opt.format, for_eval=self.opt.eval)
-                print("Results have been written to json.")
-                return
+                self.final_results = write_json(final_result, self.opt.outputpath, form=self.opt.format, for_eval=self.opt.eval, outputfile=f"{outputfile}.json")
+                break
             # image channel RGB->BGR
             orig_img = np.array(orig_img, dtype=np.uint8)[:, :, ::-1]
             if boxes is None or len(boxes) == 0:
@@ -136,6 +144,7 @@ class DataWriter():
                         pose_coord = np.concatenate((pose_coords_body_foot, pose_coords_face_hand), axis=0)
                         pose_score = np.concatenate((pose_scores_body_foot, pose_scores_face_hand), axis=0)
                     else:
+                        # return heatmap space coordinates from bbox coordinates
                         pose_coord, pose_score = self.heatmap_to_coord(hm_data[i][self.eval_joints], bbox, hm_shape=hm_size, norm_type=norm_type)
                     pose_coords.append(torch.from_numpy(pose_coord).unsqueeze(0))
                     pose_scores.append(torch.from_numpy(pose_score).unsqueeze(0))
@@ -153,7 +162,8 @@ class DataWriter():
                             'kp_score':preds_scores[k],
                             'proposal_score': torch.mean(preds_scores[k]) + scores[k] + 1.25 * max(preds_scores[k]),
                             'idx':ids[k],
-                            'box':[boxes[k][0], boxes[k][1], boxes[k][2]-boxes[k][0],boxes[k][3]-boxes[k][1]] 
+                            'box':[boxes[k][0], boxes[k][1], boxes[k][2]-boxes[k][0],boxes[k][3]-boxes[k][1]], 
+                            'img_shape': orig_img.shape[:2] #(height, width, 3)
                         }
                     )
 
@@ -209,11 +219,15 @@ class DataWriter():
     def stop(self):
         # indicate that the thread should be stopped
         self.save(None, None, None, None, None, None, None)
-        self.result_worker.join()
-
+        self.result_worker.join() 
+        return self.final_results
+         
     def terminate(self):
-        # directly terminate
-        self.result_worker.terminate()
+        if self.opt.sp:
+            self._stopped = True
+        else:
+            self._stopped.value = True
+        self.stop()
 
     def clear_queues(self):
         self.clear(self.result_queue)
@@ -224,8 +238,7 @@ class DataWriter():
 
     def results(self):
         # return final result
-        print(self.final_result)
-        return self.final_result
+        return self.final_results
 
     def recognize_video_ext(self, ext=''):
         if ext == 'mp4':
