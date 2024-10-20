@@ -1,4 +1,5 @@
 import sys
+import gc
 import os
 import argparse
 from tqdm import tqdm 
@@ -55,7 +56,7 @@ class Skeleton2DInference:
             flip=False,
             debug=False,
             webcam=-1,
-            save_video=True if debug else False,
+            save_video=False,
             vis_fast=False,
             pose_flow=False,
             pose_track=True, 
@@ -173,12 +174,12 @@ class Skeleton2DInference:
                 print('===========================> Rendering remaining ' + str(self.writer.count()) + ' images in the queue...', end='\r')
             final_results = self.writer.stop()
             det_loader.stop()
+            torch.cuda.empty_cache()
+            gc.collect()
 
         except Exception as e:
             print(repr(e))
             print('An error as above occurs when processing the images, please check it')
             raise e
-        
-        print("final results : ", final_results)
         print(f"Final results of {len(final_results)} frames")
         return final_results

@@ -40,14 +40,14 @@ class DataWriter():
         else:
             self._stopped = mp.Value('b', False)
             self.result_queue = mp.Queue(maxsize=queueSize)
-        # else:
+        
+        if opt.outputpath: 
+            if not os.path.exists(opt.outputpath): 
+                os.mkdir(opt.outputpath)
 
-        if not os.path.exists(opt.outputpath): 
-            os.mkdir(opt.outputpath)
-
-        if opt.save_img:
-            if not os.path.exists(opt.outputpath + '/vis'):
-                os.mkdir(opt.outputpath + '/vis')
+            if opt.save_img:
+                if not os.path.exists(opt.outputpath + '/vis'):
+                    os.mkdir(opt.outputpath + '/vis')
 
         if opt.pose_flow:
             from trackers.PoseFlow.poseflow_infer import PoseFlowWrapper

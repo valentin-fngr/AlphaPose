@@ -728,7 +728,6 @@ def write_json(all_results, outputpath, form=None, for_eval=False, outputfile='a
             else:
                 json_results.append(result)
 
-    print(result)
 
     if form == 'cmu': # the form of CMU-Pose
         with open(os.path.join(outputpath, outputfile), 'w') as json_file:
@@ -747,8 +746,9 @@ def write_json(all_results, outputpath, form=None, for_eval=False, outputfile='a
                 with open(os.path.join(outputpath,'sep-json',name.split('.')[0]+'.json'),'w') as json_file:
                     json_file.write(json.dumps(json_results_cmu[name]))
     else: 
-        with open(os.path.join(outputpath, outputfile), 'w') as json_file:
-            json_file.write(json.dumps(json_results))
+        if outputpath:
+            with open(os.path.join(outputpath, outputfile), 'w') as json_file:
+                json_file.write(json.dumps(json_results))
     
     return json_results
 
