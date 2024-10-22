@@ -17,6 +17,7 @@ import time
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import onnxruntime
 
 from utils.utils import *
 from utils.log import logger
@@ -193,6 +194,9 @@ class STrack(BaseTrack):
         return 'OT_{}_({}-{})'.format(self.track_id, self.start_frame, self.end_frame)
 
 
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
+
 
 class Tracker(object):
     def __init__(self, opt, args):
@@ -204,10 +208,26 @@ class Tracker(object):
             m = resnet50_fc512(num_classes=1,pretrained=False)
         elif self.opt.arch == "osnet_ain":
             m = osnet_ain_x1_0(num_classes=1,pretrained=False)
-        
-        self.model = nn.DataParallel(m,device_ids=args.gpus).to(args.device).eval()
-        
-        load_pretrained_weights(self.model,self.opt.loadmodel)
+
+        self.use_onnx = False
+        self.onnx_session = None
+        self.onnx_loaded = False
+
+        print("Loading tracker model..")
+        if self.opt.loadmodel[-4:] == "onnx": 
+            self.use_onnx = True
+            self.onnx_session = onnxruntime.InferenceSession(
+                self.opt.loadmodel,
+                providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
+            )
+            print(f"Using provider: {self.onnx_session.get_providers()}")
+            self.model = None 
+            self.onnx_loaded = True
+        else:
+            print("Using torch runetime.")
+            self.model = nn.DataParallel(m,device_ids=args.gpus).to(args.device).eval()
+            load_pretrained_weights(self.model,self.opt.loadmodel)
+
         self.tracked_stracks = []  # type: list[STrack]
         self.lost_stracks = []  # type: list[STrack]
         self.removed_stracks = []  # type: list[STrack]
@@ -218,6 +238,7 @@ class Tracker(object):
         self.max_time_lost = self.buffer_size
 
         self.kalman_filter = KalmanFilter()
+
 
     def update(self,img0,inps=None,bboxs=None,pose=None,cropped_boxes=None,file_name='',pscores=None,_debug = False):
         #bboxs:[x1,y1.x2,y2]
@@ -231,7 +252,12 @@ class Tracker(object):
         assert len(inps)==len(bboxs),'Unmatched Length Between Inps and Bboxs'
         assert len(inps)==len(pose),'Unmatched Length Between Inps and Heatmaps'  
         with torch.no_grad():
-            feats = self.model(inps).cpu().numpy()
+            if self.use_onnx: 
+                ort_inputs = {self.onnx_session.get_inputs()[0].name: to_numpy(inps)}
+                # output is already on cpu  
+                feats = self.onnx_session.run(None, ort_inputs)[0]
+            else: 
+                feats = self.model(inps).cpu().numpy()
         bboxs = np.asarray(bboxs)
         if len(bboxs)>0:
             detections = [STrack(STrack.tlbr_to_tlwh(tlbrs[:]), 0.9, f,p,c,file_name,ps,30) for

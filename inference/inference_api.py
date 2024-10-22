@@ -34,8 +34,8 @@ class Skeleton2DInference:
     def __init__(self, config, checkpoint, device, qsize=10, debug=False, use_onnx=False): 
         self.cfg = update_config(config)
         self.device = device
-        self.detbatch = 1 
-        self.posebatch = 1 
+        self.detbatch = 2 
+        self.posebatch = 2 
         self.qsize = qsize
         self.detector = "yolox-l"
         self.use_onnx = use_onnx
@@ -75,15 +75,21 @@ class Skeleton2DInference:
         self.args = argparse.Namespace(**args)
         
         # TODO : this is terrible, we should do this before !
-        self.args.gpus = args.gpus if torch.cuda.device_count() >= 1 else [-1]
-        print(self.args.gpus)
+        self.args.gpus = args.gpus if torch.cuda.device_count() >= 1 and 'cuda' in args.device else [-1]
+        print("Using device : ", args.device)
         self.args.tracking = True
         self.args.cfg = self.cfg
 
+        print("Loading pose model..")
         if use_onnx:
-            self.pose_onnx_session = onnxruntime.InferenceSession(checkpoint, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+            self.pose_onnx_session = onnxruntime.InferenceSession(
+                checkpoint, 
+                providers=["CUDAExecutionProvider", "CPUExecutionProvider"]
+            )
+            print(f"Using provider: {self.pose_onnx_session.get_providers()}")
             self.pose_model = None
         else: 
+            print("Using torch runetime.")
             self.pose_model = builder.build_sppe(self.cfg.MODEL, preset_cfg=self.cfg.DATA_PRESET)
             self.pose_model.load_state_dict(torch.load(checkpoint, map_location='cpu'))
             self.pose_model.to(device)

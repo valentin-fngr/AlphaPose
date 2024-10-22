@@ -61,6 +61,7 @@ class YOLOXDetector(BaseDetector):
             self.onnx_loaded = True
 
         else: 
+            print("Using torch runetime.")
             # Load model
             self.model = self.exp.get_model()
             self.model.load_state_dict(
