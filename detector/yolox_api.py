@@ -33,8 +33,6 @@ class YOLOXDetector(BaseDetector):
         self.detector_opt = opt
         self.model_name = cfg.get("MODEL_NAME", "yolox-x")
         self.model_weights = cfg.get("MODEL_WEIGHTS", "detector/yolox/data/yolox_x.pth")
-        print(cfg)
-        print("YOLO WEIGHTS : ", self.model_weights[-4:])
         self.exp = get_exp(exp_name=self.model_name)
         self.num_classes = self.exp.num_classes
         self.conf_thres = cfg.get("CONF_THRES", 0.1)
@@ -51,7 +49,6 @@ class YOLOXDetector(BaseDetector):
 
     def load_model(self):
         args = self.detector_opt
-        print("use onnx : ", self.use_onnx)
         print(f"Loading {self.model_name.upper().replace('_', '-')} model..")
         print(f"Backend : {'Torch run time ' if not self.use_onnx else 'ONNX runetime'}")
         if self.use_onnx: 
@@ -59,9 +56,9 @@ class YOLOXDetector(BaseDetector):
                 self.model_weights,
                 providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
             )
+            print(f"Using provider: {self.onnx_session.get_providers()}")
             self.model = None 
             self.onnx_loaded = True
-            print("created onnx session ")
 
         else: 
             # Load model
@@ -113,13 +110,14 @@ class YOLOXDetector(BaseDetector):
         if not self.model and not self.onnx_loaded:
             self.load_model()
         with torch.no_grad():
-            imgs = imgs.to(args.device) if args else imgs.cuda()
             if self.use_onnx:
                 ort_inputs = {self.onnx_session.get_inputs()[0].name: to_numpy(imgs)}
                 prediction = self.onnx_session.run(None, ort_inputs)[0]
                 prediction = torch.from_numpy(prediction)
-                prediction.to(args.device)
+                if _CUDA:
+                    prediction.to(args.device)
             else: 
+                imgs = imgs.to(args.device) if args else imgs.cuda()
                 prediction = self.model(imgs)
             # do nms to the detection results, only human category is left
             dets = self.dynamic_write_results(
