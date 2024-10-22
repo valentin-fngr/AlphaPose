@@ -23,17 +23,22 @@ from alphapose.utils.writer import DataWriter
 from alphapose.utils.vis import getTime
 from alphapose.utils.transforms import flip, flip_heatmap
 
+import onnxruntime
+
+
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
 class Skeleton2DInference: 
 
-    def __init__(self, config, checkpoint, device, qsize=10, debug=False): 
+    def __init__(self, config, checkpoint, device, qsize=10, debug=False, use_onnx=False): 
         self.cfg = update_config(config)
         self.device = device
         self.detbatch = 1 
         self.posebatch = 1 
         self.qsize = qsize
         self.detector = "yolox-l"
-
+        self.use_onnx = use_onnx
         # NOTE : due to the general design of alphapose, we have to recreate args here. 
         # This is very redundant as it carries information already available in the constructor. 
         # But this is the simplest way for now ...
@@ -75,12 +80,15 @@ class Skeleton2DInference:
         self.args.tracking = True
         self.args.cfg = self.cfg
 
-
-
-        self.pose_model = builder.build_sppe(self.cfg.MODEL, preset_cfg=self.cfg.DATA_PRESET)
-        self.pose_model.load_state_dict(torch.load(checkpoint, map_location='cpu'))
-        self.pose_model.to(device)
-        self.pose_model.eval()
+        if use_onnx:
+            self.pose_onnx_session = onnxruntime.InferenceSession(checkpoint, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+            self.pose_model = None
+        else: 
+            self.pose_model = builder.build_sppe(self.cfg.MODEL, preset_cfg=self.cfg.DATA_PRESET)
+            self.pose_model.load_state_dict(torch.load(checkpoint, map_location='cpu'))
+            self.pose_model.to(device)
+            self.pose_model.eval()
+            self.pose_onnx_session = None
         
         self.pose_dataset = builder.retrieve_dataset(self.cfg.DATASET.TRAIN)
         self.writer = DataWriter(self.cfg, self.args, save_video=self.args.save_video, video_save_opt=video_save_opt, queueSize=self.qsize)
@@ -157,7 +165,13 @@ class Skeleton2DInference:
                         inps_j = inps[j * batchSize:min((j + 1) * batchSize, datalen)]
                         if self.args.flip:
                             inps_j = torch.cat((inps_j, self.flip(inps_j)))
-                        hm_j = self.pose_model(inps_j)
+                        if self.use_onnx:
+                            pose_ort_inputs = {self.pose_onnx_session.get_inputs()[0].name: to_numpy(inps_j)}
+                            hm_j = self.pose_onnx_session.run(None, pose_ort_inputs)[0]
+                            hm_j = torch.from_numpy(hm_j)
+                        else: 
+                            hm_j = self.pose_model(inps_j)
+
                         if self.args.flip:
                             hm_j_flip = flip_heatmap(hm_j[int(len(hm_j) / 2):], self.pose_dataset.joint_pairs, shift=True)
                             hm_j = (hm_j[0:int(len(hm_j) / 2)] + hm_j_flip) / 2
