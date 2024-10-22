@@ -22,7 +22,6 @@ def get_detector(opt=None):
         else: 
             raise NotImplemented("Only Yolox-l for now !")
         cfg.MODEL_NAME = opt.detector.lower()
-        cfg.MODEL_WEIGHTS = f'detector/yolox/data/{opt.detector.lower().replace("-", "_")}.pth'
         return YOLOXDetector(cfg, opt)
     elif opt.detector == 'tracker':
         from detector.tracker_api import Tracker

@@ -11,12 +11,18 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import torch
 import numpy as np
+import onnx
+import onnxruntime
 
 from yolox.yolox.exp import get_exp
 from yolox.utils import prep_image, prep_frame
 from yolox.yolox.utils import postprocess
 
 from detector.apis import BaseDetector
+
+
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
 
 class YOLOXDetector(BaseDetector):
@@ -27,6 +33,8 @@ class YOLOXDetector(BaseDetector):
         self.detector_opt = opt
         self.model_name = cfg.get("MODEL_NAME", "yolox-x")
         self.model_weights = cfg.get("MODEL_WEIGHTS", "detector/yolox/data/yolox_x.pth")
+        print(cfg)
+        print("YOLO WEIGHTS : ", self.model_weights[-4:])
         self.exp = get_exp(exp_name=self.model_name)
         self.num_classes = self.exp.num_classes
         self.conf_thres = cfg.get("CONF_THRES", 0.1)
@@ -35,27 +43,44 @@ class YOLOXDetector(BaseDetector):
         self.img_size = [self.inp_dim, self.inp_dim]
         
         self.model = None
+        self.use_onnx = False
+        if self.model_weights[-4:] == "onnx": 
+            self.use_onnx = True
+        self.onnx_session = None
+        self.onnx_loaded = False
 
     def load_model(self):
         args = self.detector_opt
-
-        # Load model
+        print("use onnx : ", self.use_onnx)
         print(f"Loading {self.model_name.upper().replace('_', '-')} model..")
-        self.model = self.exp.get_model()
-        self.model.load_state_dict(
-            torch.load(self.model_weights, map_location="cpu")["model"]
-        )
+        print(f"Backend : {'Torch run time ' if not self.use_onnx else 'ONNX runetime'}")
+        if self.use_onnx: 
+            self.onnx_session = onnxruntime.InferenceSession(
+                self.model_weights,
+                providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
+            )
+            self.model = None 
+            self.onnx_loaded = True
+            print("created onnx session ")
 
-        if args:
-            if len(args.gpus) > 1:
-                self.model = torch.nn.DataParallel(self.model, device_ids=args.gpus).to(
-                    args.device
-                )
+        else: 
+            # Load model
+            self.model = self.exp.get_model()
+            self.model.load_state_dict(
+                torch.load(self.model_weights, map_location="cpu")["model"]
+            )
+
+            if args:
+                if len(args.gpus) > 1:
+                    self.model = torch.nn.DataParallel(self.model, device_ids=args.gpus).to(
+                        args.device
+                    )
+                else:
+                    self.model.to(args.device)
             else:
-                self.model.to(args.device)
-        else:
-            self.model.cuda()
-        self.model.eval()
+                self.model.cuda()
+            self.model.eval()
+            self.onnx_session = None
 
     def image_preprocess(self, img_source):
         """
@@ -85,11 +110,17 @@ class YOLOXDetector(BaseDetector):
         if args:
             if args.gpus[0] < 0:
                 _CUDA = False
-        if not self.model:
+        if not self.model and not self.onnx_loaded:
             self.load_model()
         with torch.no_grad():
             imgs = imgs.to(args.device) if args else imgs.cuda()
-            prediction = self.model(imgs)
+            if self.use_onnx:
+                ort_inputs = {self.onnx_session.get_inputs()[0].name: to_numpy(imgs)}
+                prediction = self.onnx_session.run(None, ort_inputs)[0]
+                prediction = torch.from_numpy(prediction)
+                prediction.to(args.device)
+            else: 
+                prediction = self.model(imgs)
             # do nms to the detection results, only human category is left
             dets = self.dynamic_write_results(
                 prediction,
@@ -150,7 +181,7 @@ class YOLOXDetector(BaseDetector):
         if args:
             if args.gpus[0] < 0:
                 _CUDA = False
-        if not self.model:
+        if not self.model and not self.onnx_loaded:
             self.load_model()
         if isinstance(self.model, torch.nn.DataParallel):
             self.model = self.model.module
