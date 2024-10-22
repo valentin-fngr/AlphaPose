@@ -33,7 +33,7 @@ class YOLOXDetector(BaseDetector):
         self.nms_thres = cfg.get("NMS_THRES", 0.6)
         self.inp_dim = cfg.get("INP_DIM", 640)
         self.img_size = [self.inp_dim, self.inp_dim]
-
+        
         self.model = None
 
     def load_model(self):
